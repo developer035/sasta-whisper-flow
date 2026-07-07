@@ -90,3 +90,15 @@ typings/
 
 # Electron-Forge
 out/
+
+# App build output
+dist/
+
+# Python sidecar
+python/.venv/
+python/venv/
+
+# Local SQLite data
+*.db
+*.sqlite
+*.sqlite3
