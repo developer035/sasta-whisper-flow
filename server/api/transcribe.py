@@ -7,7 +7,6 @@ from services.dependencies import whisper_service
 
 router = APIRouter()
 
-
 @router.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
 
@@ -27,3 +26,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
 @router.get("/")
 def root():
     return {"message": "Hello this is the server for our Sasta Whisper Flow"}
+
+@router.get("/health")
+def health():
+    return {"status" : "ok"}
