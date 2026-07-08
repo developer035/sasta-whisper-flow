@@ -1,10 +1,7 @@
-import { app, BrowserWindow } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import http from 'node:http';
 import path from 'node:path';
-
-declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
-declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
+import http from 'node:http';
+import { app } from 'electron';
 
 let sidecarProcess: ChildProcessWithoutNullStreams | null = null;
 
@@ -28,7 +25,23 @@ function getServerPaths() {
 }
 
 function resolvePythonExecutable(serverDir: string) {
-  return 'C:\\Users\\vinay\\anaconda3\\envs\\sastaWhisperFlow\\python.exe';
+  const explicitPythonExe = process.env.VESPER_PYTHON_EXE;
+  if (explicitPythonExe) {
+    return explicitPythonExe;
+  }
+
+  const condaPrefix = process.env.CONDA_PREFIX;
+  if (condaPrefix) {
+    return path.join(condaPrefix, 'python.exe');
+  }
+
+  const condaEnv = process.env.CONDA_DEFAULT_ENV;
+  if (condaEnv && process.env.CONDA_EXE) {
+    const condaBase = path.dirname(process.env.CONDA_EXE);
+    return path.join(condaBase, 'envs', condaEnv, 'python.exe');
+  }
+
+  return path.join(serverDir, 'venv', 'Scripts', 'python.exe');
 }
 
 function checkHealth(): Promise<boolean> {
@@ -59,7 +72,7 @@ async function waitForHealth(maxAttempts = 60, intervalMs = 500): Promise<boolea
   return false;
 }
 
-async function startSidecar(): Promise<void> {
+export async function startSidecar(): Promise<void> {
   const { serverDir, pythonExe, scriptPath } = getServerPaths();
 
   console.log('Sidecar starting...');
@@ -99,16 +112,15 @@ async function startSidecar(): Promise<void> {
   const healthy = await waitForHealth();
 
   if (!healthy) {
-    const error = new Error('Sidecar did not become healthy in time');
-    console.error('Sidecar failed: ', error);
-    throw error;
+    console.error('Sidecar failed: ', new Error('Sidecar did not become healthy in time'));
+    throw new Error('Sidecar did not become healthy in time');
   }
 
   console.log('Sidecar ready');
   console.log('[sidecar] ready.');
 }
 
-function stopSidecar(): void {
+export function stopSidecar(): void {
   if (!sidecarProcess) {
     return;
   }
@@ -123,41 +135,3 @@ function stopSidecar(): void {
 
   sidecarProcess = null;
 }
-
-const createWindow = () => {
-  const mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 720,
-    webPreferences: {
-      preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
-    },
-  });
-
-  mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
-};
-
-app.whenReady().then(async () => {
-  try {
-    await startSidecar();
-    createWindow();
-
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
-      }
-    });
-  } catch (error) {
-    console.error('Sidecar failed: ', error);
-    app.quit();
-  }
-});
-
-app.on('before-quit', () => {
-  stopSidecar();
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
