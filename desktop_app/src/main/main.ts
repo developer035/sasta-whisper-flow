@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+import { existsSync } from 'node:fs';
 import { app, BrowserWindow } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import http from 'node:http';
@@ -5,6 +7,8 @@ import path from 'node:path';
 
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
+
+dotenv.config();
 
 let sidecarProcess: ChildProcessWithoutNullStreams | null = null;
 
@@ -28,7 +32,21 @@ function getServerPaths() {
 }
 
 function resolvePythonExecutable(serverDir: string) {
-  return 'C:\\Users\\vinay\\anaconda3\\envs\\sastaWhisperFlow\\python.exe';
+  const pythonExePath = process.env.PYTHON_EXE_PATH;
+
+  if (!pythonExePath) {
+    throw new Error(
+      'Missing PYTHON_EXE_PATH. Set it in desktop_app/.env, then restart the app.',
+    );
+  }
+
+  if (!existsSync(pythonExePath)) {
+    throw new Error(
+      `PYTHON_EXE_PATH does not exist: ${pythonExePath}. Check desktop_app/.env and confirm the conda environment path is correct.`,
+    );
+  }
+
+  return pythonExePath;
 }
 
 function checkHealth(): Promise<boolean> {

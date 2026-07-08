@@ -102,3 +102,6 @@ python/venv/
 *.db
 *.sqlite
 *.sqlite3
+
+
+*/.env
