@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { existsSync } from 'node:fs';
-import { app, BrowserWindow } from 'electron';
+import clipboardy from 'clipboardy';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
@@ -11,9 +12,52 @@ declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 dotenv.config();
 
 let sidecarProcess: ChildProcessWithoutNullStreams | null = null;
+let sidecarReady = false;
 
 const SIDECAR_PORT = 8000;
 const HEALTH_URL = `http://127.0.0.1:${SIDECAR_PORT}/health`;
+const TRANSCRIBE_URL = `http://127.0.0.1:${SIDECAR_PORT}/transcribe`;
+
+type TranscribeAudioPayload = {
+  fileName: string;
+  fileBuffer: ArrayBuffer;
+};
+
+type TranscribeAudioResult = {
+  text: string;
+  language: string;
+  confidence: number;
+};
+
+ipcMain.handle('vesper:transcribe-audio', async (_event, payload: TranscribeAudioPayload) => {
+  if (!sidecarReady) {
+    throw new Error('Sidecar is not ready yet. Please wait a moment and try again.');
+  }
+
+  const response = await fetch(TRANSCRIBE_URL, {
+    method: 'POST',
+    body: (() => {
+      const formData = new FormData();
+      formData.append(
+        'file',
+        new Blob([payload.fileBuffer], { type: 'application/octet-stream' }),
+        payload.fileName,
+      );
+      return formData;
+    })(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Transcribe request failed with ${response.status} ${response.statusText}`);
+  }
+
+  return (await response.json()) as TranscribeAudioResult;
+});
+
+ipcMain.handle('vesper:copy-text', async (_event, text: string) => {
+  await clipboardy.write(text);
+  return true;
+});
 
 function getServerPaths() {
   const isDev = !app.isPackaged;
@@ -121,6 +165,8 @@ async function startSidecar(): Promise<void> {
     console.error('Sidecar failed: ', error);
     throw error;
   }
+
+  sidecarReady = true;
 
   console.log('Sidecar ready');
   console.log('[sidecar] ready.');

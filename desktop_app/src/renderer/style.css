@@ -217,6 +217,12 @@ input {
   word-break: break-all;
 }
 
+.dropzone__status {
+  margin: 0;
+  color: #697386;
+  font-size: 13px;
+}
+
 .result-area {
   grid-column: 2 / 3;
   grid-row: 3 / 4;

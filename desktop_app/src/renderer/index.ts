@@ -1,6 +1,18 @@
 import './style.css';
 
 type TabKey = 'upload' | 'history';
+type TranscribeResponse = {
+	text: string;
+	language: string;
+	confidence: number;
+};
+
+type VesperApi = {
+	transcribeAudio: (fileName: string, fileBuffer: ArrayBuffer) => Promise<TranscribeResponse>;
+	copyText: (text: string) => Promise<boolean>;
+};
+
+const vesper = (window as Window & { vesper: VesperApi }).vesper;
 
 const root = document.createElement('main');
 root.className = 'app-shell';
@@ -131,7 +143,12 @@ resultArea.readOnly = true;
 resultArea.value = '';
 resultArea.placeholder = 'Transcription will appear here.';
 
+const dropzoneStatus = document.createElement('p');
+dropzoneStatus.className = 'dropzone__status';
+dropzoneStatus.textContent = 'Select an audio file to begin.';
+
 controls.append(transcribeButton, copyButton);
+dropzoneInner.append(dropzoneStatus);
 uploadGrid.append(dropzone, fileInput, controls, resultLabel, resultArea);
 uploadPanel.append(uploadGrid);
 
@@ -165,6 +182,7 @@ content.append(uploadPanel, historyPanel);
 
 function updateSelectedFile(fileName: string) {
 	selectedFile.textContent = fileName || 'No file selected';
+  dropzoneStatus.textContent = fileName ? 'Ready to transcribe.' : 'Select an audio file to begin.';
 }
 
 fileInput.addEventListener('change', () => {
@@ -196,9 +214,33 @@ dropzone.addEventListener('drop', (event) => {
 	updateSelectedFile(file.name);
 });
 
-transcribeButton.addEventListener('click', () => {
-	resultArea.value = resultArea.value || 'Transcription will be generated here in the next milestone.';
-	statusChip.textContent = 'Ready';
+	transcribeButton.addEventListener('click', async () => {
+		const file = fileInput.files?.[0];
+		if (!file) {
+			statusChip.textContent = 'No file';
+			dropzoneStatus.textContent = 'Pick an audio file first.';
+			return;
+		}
+
+		statusChip.textContent = 'Transcribing';
+		transcribeButton.disabled = true;
+		copyButton.disabled = true;
+		dropzoneStatus.textContent = 'Uploading to sidecar...';
+		resultArea.value = 'Transcribing...';
+
+		try {
+			const response = await vesper.transcribeAudio(file.name, await file.arrayBuffer());
+			resultArea.value = response.text;
+			statusChip.textContent = 'Ready';
+			dropzoneStatus.textContent = `Language: ${response.language} · Confidence: ${response.confidence.toFixed(2)}`;
+		} catch (error) {
+			resultArea.value = '';
+			statusChip.textContent = 'Error';
+			dropzoneStatus.textContent = error instanceof Error ? error.message : 'Transcription failed.';
+		} finally {
+			transcribeButton.disabled = false;
+			copyButton.disabled = false;
+		}
 });
 
 copyButton.addEventListener('click', async () => {
@@ -206,7 +248,7 @@ copyButton.addEventListener('click', async () => {
 		return;
 	}
 
-	await navigator.clipboard.writeText(resultArea.value);
+		await vesper.copyText(resultArea.value);
 	statusChip.textContent = 'Copied';
 });
 
