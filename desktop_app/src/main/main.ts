@@ -5,6 +5,16 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
+import {
+	initializeDatabase,
+	saveTranscription,
+	getAllTranscriptions,
+	deleteTranscription,
+	clearAllTranscriptions,
+	getTranscriptionCount,
+	closeDatabase,
+	type TranscriptionRecord
+} from './database';
 
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
@@ -57,6 +67,27 @@ ipcMain.handle('vesper:transcribe-audio', async (_event, payload: TranscribeAudi
 ipcMain.handle('vesper:copy-text', async (_event, text: string) => {
   await clipboardy.write(text);
   return true;
+});
+
+// History IPC Handlers
+ipcMain.handle('vesper:save-transcription', async (_event, payload: { fileName: string; text: string; language: string; confidence: number }) => {
+  return saveTranscription(payload.fileName, payload.text, payload.language, payload.confidence);
+});
+
+ipcMain.handle('vesper:get-history', async (_event, limit = 100, offset = 0) => {
+  return getAllTranscriptions(limit, offset);
+});
+
+ipcMain.handle('vesper:delete-transcription', async (_event, id: number) => {
+  return deleteTranscription(id);
+});
+
+ipcMain.handle('vesper:clear-history', async () => {
+  return clearAllTranscriptions();
+});
+
+ipcMain.handle('vesper:get-history-count', async () => {
+  return getTranscriptionCount();
 });
 
 function getServerPaths() {
@@ -202,6 +233,9 @@ const createWindow = () => {
 
 app.whenReady().then(async () => {
   try {
+    // Initialize database first
+    await initializeDatabase();
+    
     await startSidecar();
     createWindow();
 
@@ -211,13 +245,14 @@ app.whenReady().then(async () => {
       }
     });
   } catch (error) {
-    console.error('Sidecar failed: ', error);
+    console.error('App initialization failed: ', error);
     app.quit();
   }
 });
 
 app.on('before-quit', () => {
   stopSidecar();
+  closeDatabase();
 });
 
 app.on('window-all-closed', () => {

@@ -8,4 +8,8 @@ module.exports = {
   module: {
     rules: require('./webpack.rules'),
   },
+
+  resolve: {
+    extensions: ['.ts', '.tsx', '.js', '.json'],
+  },
 };

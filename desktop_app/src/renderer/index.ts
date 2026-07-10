@@ -1,15 +1,30 @@
 import './style.css';
 
 type TabKey = 'upload' | 'history';
+
 type TranscribeResponse = {
 	text: string;
 	language: string;
 	confidence: number;
 };
 
+export type TranscriptionRecord = {
+	id: number;
+	filename: string;
+	text: string;
+	language: string;
+	confidence: number;
+	created_at: string;
+};
+
 type VesperApi = {
 	transcribeAudio: (fileName: string, fileBuffer: ArrayBuffer) => Promise<TranscribeResponse>;
 	copyText: (text: string) => Promise<boolean>;
+	saveTranscription: (fileName: string, text: string, language: string, confidence: number) => Promise<TranscriptionRecord>;
+	getHistory: (limit?: number, offset?: number) => Promise<TranscriptionRecord[]>;
+	deleteTranscription: (id: number) => Promise<boolean>;
+	clearHistory: () => Promise<boolean>;
+	getHistoryCount: () => Promise<number>;
 };
 
 const vesper = (window as Window & { vesper: VesperApi }).vesper;
@@ -61,6 +76,11 @@ function setActiveTab(tabKey: TabKey) {
 	tabPanels.forEach((panel, key) => {
 		panel.hidden = key !== tabKey;
 	});
+
+	// Refresh history when switching to history tab
+	if (tabKey === 'history') {
+		loadHistory();
+	}
 }
 
 function createTabButton(label: string, tabKey: TabKey) {
@@ -81,6 +101,7 @@ tabs.append(createTabButton('Upload & Transcribe', 'upload'), createTabButton('H
 const content = document.createElement('section');
 content.className = 'tab-panels';
 
+// Upload Panel
 const uploadPanel = document.createElement('section');
 uploadPanel.className = 'panel';
 uploadPanel.setAttribute('role', 'tabpanel');
@@ -152,6 +173,7 @@ dropzoneInner.append(dropzoneStatus);
 uploadGrid.append(dropzone, fileInput, controls, resultLabel, resultArea);
 uploadPanel.append(uploadGrid);
 
+// History Panel
 const historyPanel = document.createElement('section');
 historyPanel.className = 'panel';
 historyPanel.setAttribute('role', 'tabpanel');
@@ -163,17 +185,35 @@ const historyTitle = document.createElement('h2');
 historyTitle.className = 'panel__title';
 historyTitle.textContent = 'History';
 
-const historyHint = document.createElement('p');
-historyHint.className = 'panel__hint';
-historyHint.textContent = 'Transcription history will be added in milestone 4.';
+const historyActions = document.createElement('div');
+historyActions.className = 'history-actions';
 
-historyHeader.append(historyTitle, historyHint);
+const refreshButton = document.createElement('button');
+refreshButton.type = 'button';
+refreshButton.className = 'icon-button';
+refreshButton.textContent = '↻';
+refreshButton.title = 'Refresh';
+refreshButton.addEventListener('click', loadHistory);
+
+const clearAllButton = document.createElement('button');
+clearAllButton.type = 'button';
+clearAllButton.className = 'danger-button';
+clearAllButton.textContent = 'Clear All';
+clearAllButton.addEventListener('click', handleClearAll);
+
+historyActions.append(refreshButton, clearAllButton);
+
+historyHeader.append(historyTitle, historyActions);
 
 const historyList = document.createElement('ul');
 historyList.className = 'history-list';
 historyList.setAttribute('aria-label', 'Transcription history');
 
-historyPanel.append(historyHeader, historyList);
+const historyEmpty = document.createElement('p');
+historyEmpty.className = 'history-empty';
+historyEmpty.textContent = 'No transcription history yet. Transcribe an audio file to get started.';
+
+historyPanel.append(historyHeader, historyEmpty, historyList);
 
 tabPanels.set('upload', uploadPanel);
 tabPanels.set('history', historyPanel);
@@ -182,7 +222,7 @@ content.append(uploadPanel, historyPanel);
 
 function updateSelectedFile(fileName: string) {
 	selectedFile.textContent = fileName || 'No file selected';
-  dropzoneStatus.textContent = fileName ? 'Ready to transcribe.' : 'Select an audio file to begin.';
+	dropzoneStatus.textContent = fileName ? 'Ready to transcribe.' : 'Select an audio file to begin.';
 }
 
 fileInput.addEventListener('change', () => {
@@ -214,33 +254,41 @@ dropzone.addEventListener('drop', (event) => {
 	updateSelectedFile(file.name);
 });
 
-	transcribeButton.addEventListener('click', async () => {
-		const file = fileInput.files?.[0];
-		if (!file) {
-			statusChip.textContent = 'No file';
-			dropzoneStatus.textContent = 'Pick an audio file first.';
-			return;
-		}
+transcribeButton.addEventListener('click', async () => {
+	const file = fileInput.files?.[0];
+	if (!file) {
+		statusChip.textContent = 'No file';
+		dropzoneStatus.textContent = 'Pick an audio file first.';
+		return;
+	}
 
-		statusChip.textContent = 'Transcribing';
-		transcribeButton.disabled = true;
-		copyButton.disabled = true;
-		dropzoneStatus.textContent = 'Uploading to sidecar...';
-		resultArea.value = 'Transcribing...';
+	statusChip.textContent = 'Transcribing';
+	transcribeButton.disabled = true;
+	copyButton.disabled = true;
+	dropzoneStatus.textContent = 'Uploading to sidecar...';
+	resultArea.value = 'Transcribing...';
 
+	try {
+		const response = await vesper.transcribeAudio(file.name, await file.arrayBuffer());
+		resultArea.value = response.text;
+		statusChip.textContent = 'Ready';
+		dropzoneStatus.textContent = `Language: ${response.language} · Confidence: ${response.confidence.toFixed(2)}`;
+
+		// Save to history
 		try {
-			const response = await vesper.transcribeAudio(file.name, await file.arrayBuffer());
-			resultArea.value = response.text;
-			statusChip.textContent = 'Ready';
-			dropzoneStatus.textContent = `Language: ${response.language} · Confidence: ${response.confidence.toFixed(2)}`;
-		} catch (error) {
-			resultArea.value = '';
-			statusChip.textContent = 'Error';
-			dropzoneStatus.textContent = error instanceof Error ? error.message : 'Transcription failed.';
-		} finally {
-			transcribeButton.disabled = false;
-			copyButton.disabled = false;
+			await vesper.saveTranscription(file.name, response.text, response.language, response.confidence);
+			console.log('[renderer] Transcription saved to history');
+		} catch (saveError) {
+			console.error('[renderer] Failed to save transcription:', saveError);
 		}
+	} catch (error) {
+		resultArea.value = '';
+		statusChip.textContent = 'Error';
+		dropzoneStatus.textContent = error instanceof Error ? error.message : 'Transcription failed.';
+	} finally {
+		transcribeButton.disabled = false;
+		copyButton.disabled = false;
+	}
 });
 
 copyButton.addEventListener('click', async () => {
@@ -248,9 +296,125 @@ copyButton.addEventListener('click', async () => {
 		return;
 	}
 
-		await vesper.copyText(resultArea.value);
+	await vesper.copyText(resultArea.value);
 	statusChip.textContent = 'Copied';
 });
+
+// History Functions
+async function loadHistory() {
+	try {
+		const records = await vesper.getHistory();
+		renderHistory(records);
+	} catch (error) {
+		console.error('[renderer] Failed to load history:', error);
+	}
+}
+
+function renderHistory(records: TranscriptionRecord[]) {
+	// Clear existing items
+	historyList.innerHTML = '';
+
+	if (records.length === 0) {
+		historyEmpty.style.display = 'block';
+		return;
+	}
+
+	historyEmpty.style.display = 'none';
+
+	records.forEach(record => {
+		const item = createHistoryItem(record);
+		historyList.appendChild(item);
+	});
+}
+
+function createHistoryItem(record: TranscriptionRecord): HTMLLIElement {
+	const li = document.createElement('li');
+	li.className = 'history-item';
+	li.dataset.id = String(record.id);
+
+	// Format date
+	const date = new Date(record.created_at);
+	const formattedDate = date.toLocaleDateString('en-US', {
+		month: 'short',
+		day: 'numeric',
+		year: 'numeric'
+	});
+	const formattedTime = date.toLocaleTimeString('en-US', {
+		hour: '2-digit',
+		minute: '2-digit'
+	});
+
+	// Truncate text for preview
+	const previewText = record.text.length > 200 
+		? record.text.substring(0, 200) + '...' 
+		: record.text;
+
+	li.innerHTML = `
+		<div class="history-item__header">
+			<span class="history-item__filename">${escapeHtml(record.filename)}</span>
+			<span class="history-item__meta">
+				${record.language} · ${(record.confidence * 100).toFixed(1)}%
+			</span>
+		</div>
+		<div class="history-item__text">${escapeHtml(previewText)}</div>
+		<div class="history-item__footer">
+			<span class="history-item__date">${formattedDate} ${formattedTime}</span>
+			<div class="history-item__actions">
+				<button type="button" class="history-item__action history-item__action--copy" title="Copy full text">Copy</button>
+				<button type="button" class="history-item__action history-item__action--delete" title="Delete">Delete</button>
+			</div>
+		</div>
+	`;
+
+	// Add event listeners
+	const copyBtn = li.querySelector('.history-item__action--copy');
+	const deleteBtn = li.querySelector('.history-item__action--delete');
+
+	copyBtn?.addEventListener('click', async () => {
+		await vesper.copyText(record.text);
+		statusChip.textContent = 'Copied from history';
+	});
+
+	deleteBtn?.addEventListener('click', async () => {
+		if (confirm('Delete this transcription from history?')) {
+			try {
+				await vesper.deleteTranscription(record.id);
+				li.remove();
+				// Check if list is now empty
+				if (historyList.children.length === 0) {
+					historyEmpty.style.display = 'block';
+				}
+			} catch (error) {
+				console.error('[renderer] Failed to delete transcription:', error);
+			}
+		}
+	});
+
+	return li;
+}
+
+function escapeHtml(text: string): string {
+	const div = document.createElement('div');
+	div.textContent = text;
+	return div.innerHTML;
+}
+
+async function handleClearAll() {
+	const count = await vesper.getHistoryCount();
+	if (count === 0) {
+		return;
+	}
+
+	if (confirm(`Clear all ${count} transcriptions from history? This cannot be undone.`)) {
+		try {
+			await vesper.clearHistory();
+			historyList.innerHTML = '';
+			historyEmpty.style.display = 'block';
+		} catch (error) {
+			console.error('[renderer] Failed to clear history:', error);
+		}
+	}
+}
 
 setActiveTab('upload');
 
