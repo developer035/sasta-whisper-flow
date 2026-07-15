@@ -1,5 +1,21 @@
+import { WebpackPlugin } from '@electron-forge/plugin-webpack';
+
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
+
+const config = {
+  packagerConfig: {},
+  rebuildConfig: {}, // Automatically triggers electron-rebuild when running scripts
+  plugins: [
+    new WebpackPlugin({
+      mainConfig,
+      renderer: {
+        config: rendererConfig,
+        entryPoints: [/*...*/]
+      }
+    })
+  ]
+};
 
 module.exports = {
   packagerConfig: {

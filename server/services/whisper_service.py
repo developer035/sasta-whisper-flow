@@ -18,10 +18,13 @@ class WhisperService:
 
     def transcribe(self, audio_path):
 
+        custom_prompt = "This audio can be in Hindi and English both, so transcribe accordingly."
+
         segments, info = self.model.transcribe(
             audio_path,
             beam_size=5,
-            language="en",
+            language="hi",
+            initial_prompt = custom_prompt,
         )
 
         text = " ".join(segment.text.strip() for segment in segments)

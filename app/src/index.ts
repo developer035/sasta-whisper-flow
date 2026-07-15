@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { existsSync } from 'node:fs';
 import clipboardy from 'clipboardy';
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
@@ -14,15 +14,20 @@ import {
 	getTranscriptionCount,
 	closeDatabase,
 	type TranscriptionRecord
-} from './database';
+} from './main/database';
+import { startHotkeyListener, stopHotkeyListener, setStateChangeCallback, forceIdle } from './main/hotkeys';
+import { runTranscriptionPipeline } from './main/transcription';
 
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
+declare const NOTCH_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
+declare const NOTCH_WINDOW_WEBPACK_ENTRY: string;
 
 dotenv.config();
 
 let sidecarProcess: ChildProcessWithoutNullStreams | null = null;
 let sidecarReady = false;
+let notchWindow: BrowserWindow | null = null;
 
 const SIDECAR_PORT = 8000;
 const HEALTH_URL = `http://127.0.0.1:${SIDECAR_PORT}/health`;
@@ -111,13 +116,13 @@ function resolvePythonExecutable(serverDir: string) {
 
   if (!pythonExePath) {
     throw new Error(
-      'Missing PYTHON_EXE_PATH. Set it in desktop_app/.env, then restart the app.',
+      'Missing PYTHON_EXE_PATH. Set it in app/.env, then restart the app.',
     );
   }
 
   if (!existsSync(pythonExePath)) {
     throw new Error(
-      `PYTHON_EXE_PATH does not exist: ${pythonExePath}. Check desktop_app/.env and confirm the conda environment path is correct.`,
+      `PYTHON_EXE_PATH does not exist: ${pythonExePath}. Check app/.env and confirm the conda environment path is correct.`,
     );
   }
 
@@ -234,6 +239,49 @@ const createWindow = () => {
   mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 };
 
+function createNotchWindow(): BrowserWindow {
+  const { workArea } = screen.getPrimaryDisplay();
+  const width = 200;
+  const height = 44;
+  const x = Math.round(workArea.x + (workArea.width - width) / 2);
+  const y = workArea.y + workArea.height - height;
+
+  const win = new BrowserWindow({
+    width,
+    height,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    resizable: false,
+    movable: false,
+    show: false, // hidden on creation; revealed only when recording starts
+    webPreferences: {
+      preload: NOTCH_WINDOW_PRELOAD_WEBPACK_ENTRY,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  win.loadURL(NOTCH_WINDOW_WEBPACK_ENTRY);
+  return win;
+}
+
+// Notch toggle — test trigger for Milestone 5; real hotkeys come in Milestone 6
+ipcMain.handle('vesper:toggle-notch', () => {
+  if (!notchWindow || notchWindow.isDestroyed()) return;
+  if (notchWindow.isVisible()) {
+    notchWindow.hide();
+  } else {
+    notchWindow.showInactive();
+  }
+});
+
 app.whenReady().then(async () => {
   try {
     // Initialize database first
@@ -241,6 +289,61 @@ app.whenReady().then(async () => {
     
     await startSidecar();
     createWindow();
+
+    // Create the notch window — hidden until the first hotkey triggers recording.
+    notchWindow = createNotchWindow();
+
+    // Wire state-change callback BEFORE starting the hotkey listener.
+    // Register the ipcMain listener first to avoid a race with the renderer.
+    setStateChangeCallback(async (newState) => {
+      if (!notchWindow || notchWindow.isDestroyed()) return;
+
+      switch (newState) {
+        case 'recording_ptt':
+        case 'recording_locked':
+          notchWindow.showInactive();
+          notchWindow.webContents.send('notch:start-recording');
+          break;
+
+        case 'transcribing': {
+          // 1. Register listener BEFORE sending stop to avoid race condition.
+          const bufferPromise = new Promise<ArrayBuffer>((resolve, reject) => {
+            const timeout = setTimeout(
+              () => reject(new Error('Recording data timed out after 30 s')),
+              30_000,
+            );
+            ipcMain.once('notch:recording-data', (_evt, data: ArrayBuffer) => {
+              clearTimeout(timeout);
+              resolve(data);
+            });
+          });
+
+          // 2. Tell the renderer to stop recording and show the loading ring.
+          notchWindow.webContents.send('notch:stop-recording');
+          notchWindow.webContents.send('notch:show-transcribing');
+
+          // 3. Await the recorded data then run the full pipeline.
+          try {
+            const buffer = await bufferPromise;
+            await runTranscriptionPipeline(buffer, () => {
+              notchWindow?.hide();
+              forceIdle();
+            });
+          } catch (err) {
+            console.error('[main] Transcription pipeline error:', err);
+            notchWindow?.hide();
+            forceIdle();
+          }
+          break;
+        }
+
+        default:
+          break;
+      }
+    });
+
+    // Start the global hotkey listener (state machine)
+    startHotkeyListener();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -255,7 +358,11 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   stopSidecar();
+  stopHotkeyListener();
   closeDatabase();
+  if (notchWindow && !notchWindow.isDestroyed()) {
+    notchWindow.destroy();
+  }
 });
 
 app.on('window-all-closed', () => {

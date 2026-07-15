@@ -1,0 +1,106 @@
+/* ── Reset ──────────────────────────────────────────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+
+/* ── Pill container ─────────────────────────────────────────────────────────── */
+.notch-pill {
+  width: 100%;
+  height: 100%;
+  background: #1a1f29;
+  border: 1px solid rgba(232, 163, 61, 0.22);
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    0 0 14px rgba(232, 163, 61, 0.07),
+    0 4px 20px rgba(0, 0, 0, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+
+/* ── View base ───────────────────────────────────────────────────────────────── */
+.notch-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  gap: 8px;
+  padding: 0 14px;
+}
+
+.notch-view[hidden] { display: none !important; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   RECORDING VIEW
+══════════════════════════════════════════════════════════════════════════════ */
+
+/* Blinking red dot */
+.rec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e05060;
+  flex-shrink: 0;
+  animation: rec-blink 1.1s ease-in-out infinite;
+}
+
+@keyframes rec-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
+}
+
+/* Waveform bar container */
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+}
+
+/* Individual bars — height is driven by JS from AnalyserNode */
+.waveform-bar {
+  width: 3px;
+  min-height: 2px;
+  height: 2px;
+  background: #e05060;
+  border-radius: 2px;
+  transition: height 45ms ease;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TRANSCRIBING VIEW
+══════════════════════════════════════════════════════════════════════════════ */
+
+.transcribing-label {
+  color: #a7b0c0;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  user-select: none;
+}
+
+/* SVG ring wrapper */
+.loading-ring {
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+/* Only the arc spins — transform-origin must match the SVG cx/cy (11 11) */
+.ring-arc {
+  transform-origin: 11px 11px;
+  animation: ring-spin 0.85s linear infinite;
+}
+
+@keyframes ring-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
